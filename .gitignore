@@ -1,0 +1,32 @@
+# 数据文件
+*.csv
+var_data/
+*.log
+
+# ROS2 / colcon 编译产物
+build/
+install/
+log/
+build_linkx_soem_demo/
+
+# IDE / 编辑器临时文件
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+.DS_Store
+
+# 编译目标文件
+*.o
+*.a
+*.so
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时 / 误生成文件
+*.tmp
+*.bak
