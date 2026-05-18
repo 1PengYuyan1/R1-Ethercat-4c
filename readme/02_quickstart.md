@@ -49,7 +49,14 @@ cd /home/<你>/code/Ethercat_R1
 | `--ifname <name>` | 指定 EtherCAT 网卡 |
 | `--auto-ifname` | 自动选第一块有线网卡（`en*`/`eth*`） |
 | `--sudo` | 给车体主控加 `sudo -E env ...` 前缀 |
-| `--max-speed 1.5` | 遥控最大线速度 |
+
+> 2026-05-18 起脚本不再接受 `--max-speed`。遥控最大线速度的唯一权威源是
+> `src/linkx_soem_demo/src/remote/remote_node.cpp::declare_parameter("max_speed", ...)`。
+> 改默认值要动 C++ 代码 + rebuild；运行时临时改用 `ros2 param set /remote_node max_speed <v>`。
+
+> XInput 手柄下还有 trigger 速度缩放：RT 加速 / LT 减速，
+> `scale = 0.65 + (rt − lt) × 0.35`，钳位 `[0.30, 1.00]`，
+> 静止不踩两键就走 0.65×max_speed。
 
 ## 5. 三种启动方式选择
 

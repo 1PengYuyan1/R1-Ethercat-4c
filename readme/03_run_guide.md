@@ -12,7 +12,9 @@ cd /home/<你>/code/Ethercat_R1
 | `--ifname <name>` | `enp86s0` | EtherCAT 网卡名 |
 | `--auto-ifname` | 关 | 自动选第一块 `en*`/`eth*` 有线网卡 |
 | `--sudo` | 关 | 给车体主控前缀 `sudo -E env ...` 透传 ROS 环境 |
-| `--max-speed <v>` | `1.0` | 遥控最大线速度 [m/s]（脚本默认；launch 默认 1.5） |
+
+> 2026-05-18 起脚本不再接受 `--max-speed`。最大线速度由 `remote_node.cpp::declare_parameter`
+> 单点决定；改默认值动 C++，运行时改用 `ros2 param set /remote_node max_speed <v>`。
 
 脚本流程：
 
@@ -37,16 +39,15 @@ bash src/linkx_soem_demo/launch/run_link.sh --sudo --ifname enp86s0
 额外参数：
 
 - `--no-vehicle`：仅启动遥控链路，不跑车体主控
-- `--max-speed <v>`：遥控最大速度
 
 注意：包内脚本默认网卡是 `enp3s0`（与根脚本不同），多数情况要显式带 `--ifname`。
+2026-05-18 起 `--max-speed` 已废，详见上节注。
 
 ## 3. 直接 launch（最透明）
 
 ```bash
 ros2 launch linkx_bringup full_system.launch.py \
     ifname:=enp86s0 \
-    max_speed:=1.5 \
     start_vehicle_control:=true \
     vehicle_prefix:="sudo -E env LD_LIBRARY_PATH=$LD_LIBRARY_PATH ..." \
     ros_nodes_prefix:=""
@@ -57,10 +58,12 @@ ros2 launch linkx_bringup full_system.launch.py \
 | 参数 | 默认值 | 用途 |
 | --- | --- | --- |
 | `ifname` | `enp86s0` | 网卡名 |
-| `max_speed` | `1.5` | 遥控最大线速度 |
 | `start_vehicle_control` | `true` | 是否启动车体 |
 | `vehicle_prefix` | `""` | 车体进程前缀 |
 | `ros_nodes_prefix` | `""` | 全部 ROS 节点前缀 |
+
+> ⚠️ `max_speed` 不再是 launch 参数，唯一权威源在 `remote_node.cpp::declare_parameter`。
+> 运行时改用 `ros2 param set /remote_node max_speed <v>`。
 
 ## 4. 权限模型
 
@@ -159,3 +162,66 @@ tail -f /tmp/r1_live.log | python3 tools/plot_feedback_wave.py --series now_vx
 - **网卡名错** → EtherCAT 主站初始化失败。
 - **build/install/log** 是自动产物，异常时可清理后重编。
 - **优雅退出**：`Ctrl+C` 会触发信号处理，主循环跳出前会落盘累计值。
+
+## 9. 控制模式（2026-05-18）
+
+### 9.1 drive_mode 双档 profile
+
+底盘 `Class_Chassis::drive_mode_` 在两档间切换，影响舵向 slew 和 LPF：
+
+| profile | slew | LPF α | τ ≈ dt/α | 用途 |
+| --- | --- | --- | --- | --- |
+| `Drive_Mode_MANUAL` | 500 °/s | 0.30 | 6.7 ms | 手柄遥控（默认） |
+| `Drive_Mode_SEMI_AUTO` | 200 °/s | 0.15 | 13 ms | 路径跟随 / Auto_Pilot |
+
+切档由 `Class_Auto_Pilot::Start/Stop` 自动完成（`auto_pilot.cpp:152 / 189`）。手动模式
+下任何外部直接 `Set_Drive_Mode` 都会再被 auto_pilot 接管时改回。
+
+> 不要 fork 底盘代码做 manual / semi_auto 双实例，profile 切换是在同一底盘对象上完成的。
+
+环境变量覆盖（开发期调参，正式发布前回默认）：
+
+```bash
+STEER_SLEW_RATE_DEG_S=500    # MANUAL slew
+STEER_LPF_ALPHA=0.30         # MANUAL LPF α
+STEER_SLEW_RATE_DEG_S_SEMI=200
+STEER_LPF_ALPHA_SEMI=0.15
+```
+
+### 9.2 Auto_Pilot 拐角软化
+
+路径点之间过渡用 cos²(Δθ/2) + smoothstep 重写（`auto_pilot.cpp:283 起`）：
+
+- `V_corner = seg_speed × cos²(Δθ/2)`：直线全速、90° 半速、180° U-turn 停下转
+- 窗口 `L = clamp(L0 × Δθ/(π/2), Lmin, Lmax)`，`L0 = 220 mm`、`Lmin = 40 mm`
+- 进出曲线 smoothstep `3u² − 2u³`：边界 V′ = 0，无加速度阶跃
+- 方向 lerp 与速度共用同一 smoothstep 权重，避免方向先到位但速度还在拐角速→ steer 跟不上
+
+旧版的 blend + corner-slow 死锁分支已删，不要再加。
+
+### 9.3 手动模式航向纠偏已删
+
+`robot.cpp:347` 手动分支只有 cmd_omega 透传，**不接 OPS 纠偏**。三轮迭代后用户反馈
+「关纠偏比开纠偏好」。稳态 yaw 漂靠 `kWheelSpeedCalib[4]` 4 轮速度标定在底盘端
+吸收（见 [05_calibration.md](05_calibration.md) §5）。
+
+半自动 / Auto_Pilot 路径才走 OPS 横向 PID + 航向 PID。
+
+### 9.4 F710 trigger 速度缩放（XInput）
+
+`Class_LogF710::Resolve_Speed_Scale` (`dvc_logF710.cpp:124`)：
+
+```text
+lt = (1 - axes[2]) * 0.5    # LT 压下量 ∈ [0, 1]
+rt = (1 - axes[5]) * 0.5    # RT 压下量 ∈ [0, 1]
+scale = 0.65 + (rt - lt) * 0.35
+scale = clamp(scale, 0.30, 1.00)
+```
+
+- 不踩两键 → 0.65× 基线
+- 只踩 RT → 1.0× max_speed
+- 只踩 LT → 0.30× max_speed
+- 两键同时按 → 抵消，仍 0.65×
+
+DInput / 旧驱动下 `Resolve_Speed_Scale` 返回 1.0 透传，不缩放（避免误伤）。
+ABXY 按键在 XInput 下重映射为 `0=A, 1=B, 2=X, 3=Y`。

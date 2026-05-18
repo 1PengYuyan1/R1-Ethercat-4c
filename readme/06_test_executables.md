@@ -9,12 +9,16 @@
 | `linkx_soem_demo` | `vehicle_control/main.cpp` | 主程序入口（EtherCAT 1ms 主循环） | ✅ |
 | `remote_node_cpp` | `remote/remote_node.cpp` | 手柄 → ROS2 话题 | 仅手柄 |
 | `can_link_test` | `test_mains/can_link_test_main.cpp` | EtherCAT-4C 4 路 CAN 发包能力验证 | ✅ |
+| `canfd_link_test` | `test_mains/canfd_link_test_main.cpp` | 双 LinkX (CAN-FD + classic) alias 绑定与 FD 发包验证 | ✅ |
 | `ops_test` | `test_mains/ops_test_main.cpp` | OPS-9 接收解码冒烟测试 | ✅ |
 | `steer_tuning` | `test_mains/steer_tuning_main.cpp` | 舵向 PD / 力矩前馈调参（独立运行） | ✅ |
 | `motor_calib` | `test_mains/motor_calib_main.cpp` | DM 舵向电机参数标定 | ✅（轮胎离地） |
 | `odrive_calib` | `test_mains/odrive_calib_main.cpp` | ODrive 驱动轮参数标定 | ✅（轮胎离地） |
 | `odrive_protocol_test` | `test_mains/odrive_protocol_test_main.cpp` | CAN Simple 协议函数级冒烟 | ✅ |
 | `encoder_ack_test` | `test_mains/encoder_ack_test_main.cpp` | 4 路 BRT 编码器 ACK 验证 | ✅ |
+| `enc3_recover` | `test_mains/enc3_recover_main.cpp` | 单独抢救 `enc3`（卡 ~19/30Hz 时执行复位序列） | ✅ |
+| `enc3_set_period` | `test_mains/enc3_set_period_main.cpp` | 单独给 `enc3` 改自发周期 | ✅ |
+| `linkx_set_alias` | `test_mains/linkx_set_alias_main.cpp` | 给 LinkX 写 alias（EEPROM）—— **不持久**，每次上电要重写 | ✅ |
 | `encoder_byteorder_test` | `tests/test_brt_encoder.cpp` | BRT 字节序 + ACK 解析（dry-run，**无需硬件**） | ❌ |
 | `robot_test` | `test_mains/robot_test_main.cpp` | `Class_Robot` 上机回归测试，限速短转 | ✅ |
 
@@ -94,3 +98,35 @@ sudo ./build/linkx_soem_demo/robot_test enp86s0
 ```
 
 注意：会真实驱动车体（限速），现场需保证安全。
+
+## 10. CAN-FD 双从站验证：`canfd_link_test`
+
+2026-05-11 集成双 LinkX 后用的冒烟工具。`task.cpp` 用 alias-based binding 区分：
+`slave[1] = FD`（alias=1）、`slave[2] = classic`（alias=2）。本测试只验证 FD 从站能
+正确发包并回 ACK。
+
+```bash
+sudo ./install/linkx_soem_demo/lib/linkx_soem_demo/canfd_link_test enp86s0
+```
+
+## 11. enc3 抢救：`enc3_recover` / `enc3_set_period`
+
+某些硬件上 `enc3` 自发频率会被锁死在 ~19 或 ~30 Hz（BRT 编码器固件警告锁定，
+不是软件 bug）。这两个工具是单独操作 `enc3` 用的复位 / 设置周期 fallback。
+日常不需要跑；只有当 `[ENC] enc3 freq=...` 长期偏低时才用。
+
+```bash
+sudo ./install/linkx_soem_demo/lib/linkx_soem_demo/enc3_recover
+sudo ./install/linkx_soem_demo/lib/linkx_soem_demo/enc3_set_period
+```
+
+## 12. LinkX alias 写入：`linkx_set_alias`
+
+给 LinkX 从站写 EEPROM alias，用于 alias-based binding。
+
+```bash
+sudo ./install/linkx_soem_demo/lib/linkx_soem_demo/linkx_set_alias <ifname> <slave_pos> <alias>
+```
+
+> ⚠️ 实测 2026-05-11 起的 LinkX 固件 **alias 不持久**：写完上电就丢。
+> 当前规避方法是每次上电后跑一次这个工具补写。后续如固件更新需要复测。

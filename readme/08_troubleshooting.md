@@ -70,7 +70,17 @@ sudo setcap 'cap_net_raw,cap_net_admin+ep' \
 
 ### 3.3 编码器频率异常
 - 确认配置：`ch=2 / 1Mbps / 4 enc / 5ms 周期 → 200 Hz`
-- 已知现象：某硬件上 `enc3` 稳定在 ~19 Hz（硬件特性，不是软件 bug）
+- 已知现象：某硬件上 `enc3` 稳定在 ~19/30 Hz（BRT 编码器固件警告锁定，硬件特性，非软件 bug）
+- 抢救：`enc3_recover` / `enc3_set_period`（见 [06_test_executables.md §11](06_test_executables.md)）
+
+### 3.4 LinkX SDO `WAKEUP FAILED`
+SOEM 的 SDO timeout **单位是微秒**，不是毫秒。一律用 `EC_TIMEOUTRXM`，
+别传裸数字（曾因为传 5000 当 5s 用，实际只 5ms，结果一直超时）。
+
+### 3.5 LinkX PDO 槽位每 cycle 重发
+2026-05-17 固件无 valid bit，slot 内容每 cycle 重发到 CAN。
+**「一次性按键发送」语义不存在**——持续状态信号必须用 payload 表态，
+单次脉冲帧靠 quiet TX 路径写一次就走。
 
 ## 4. 控制 / 标定
 
@@ -99,6 +109,36 @@ sudo setcap 'cap_net_raw,cap_net_admin+ep' \
 ### 4.4 `[CHASSIS][PERSIST-FAIL]`
 - 写盘失败：检查 `var_data/` 目录权限和磁盘空间
 - 不会中断控制循环，下次 200ms 周期会重试
+- **跑过 sudo 后切非 sudo 会必现**：`var_data/*.txt` 归了 root；
+  `sudo chown -R $USER:$USER var_data/` 修复
+
+### 4.5 ODrive `vel_ramp_rate` 不可信
+配 10 实测 28 rad/s²。**启动窜动别调 ODrive 端 ramp**，直接走 chassis 软 slew：
+
+```bash
+WHEEL_OUTPUT_ACCEL=5 WHEEL_OUTPUT_DECEL=100 ./start_full_system.sh ...
+```
+
+`DECEL` 中间值（~5–30）最糟（ODrive vel_integrator 反向过冲），要么 5（柔）要么 100（接近阶跃）。
+
+### 4.6 停车后小幅反向位移
+- 现象：cmd→0 后车反向走 7~8 mm
+- 跟 cmd 减速形态无关，根因在 ODrive PI（vel_integrator），等 USB 调
+- 暂时接受，不要为此乱调 chassis 端 slew
+
+### 4.7 舵向校准卡死（重新调）
+2026-05-13 新方案 F：MIT 位置环 + slew + **ω_des=0** + done 滞回。
+**真根因不是 Kp 大**，是 `ω_des` 在加速。如果要重调标定段：
+
+- 先固定 `ω_des = 0` 验证可达稳定收敛（600 ms 内）
+- 再考虑动 MIT `Kp`，但默认值已经过反复验证，建议不动
+- 抽到 `steer_calibration.{h,cpp}`，不要再回去改 chassis 主循环代码
+
+### 4.8 直行偏（左偏 / 右偏）
+- 4 轮稳态速度有 ~1.5% 偏差
+- **不靠手动航向纠偏**（已删，三轮反馈"关纠偏比开"好）
+- 重测 `kWheelSpeedCalib[4]`（[05_calibration.md §5](05_calibration.md)）
+- 编译期常量，需要 `colcon build` 才生效
 
 ## 5. 遥控链路
 
@@ -112,6 +152,17 @@ ls /dev/input/js*                # 看驱动是否识别
 - 看 `remote_node_cpp` 是否启动
 - `--no-vehicle` 模式下也应有 `/cmd_vel`
 - 手柄死区参数：launch 默认 `deadzone=0.05`
+
+### 5.3 RT/LT trigger 不影响速度
+- 仅 XInput 布局（axes 数 ≥ 8）下生效；DInput / 旧驱动透传 1.0
+- `jstest /dev/input/js0` 看 LT/RT 是否落在 axes[2] / axes[5]
+- 静止时两键应输出 `+1.0`（未压），压到底 `-1.0`
+- 详细映射见 [03_run_guide.md §9.4](03_run_guide.md)
+
+### 5.4 Auto_Pilot 拐角振荡
+- 不要靠加强**航向**纠偏吸横向偏置（会激发耦合振荡 → `omega·d` 反馈 + 40 Hz + 舵 slew）
+- 横向偏置用**横向 I** 吸收
+- 拐角软化已用 `cos²(Δθ/2)`，曲线靠 `kSoftL0Mm` 调；改前先想清楚 `Δθ/dt` 对 steer 的需求
 
 ### 5.3 只想测遥控不上车
 ```bash
@@ -145,6 +196,12 @@ bash src/linkx_soem_demo/launch/run_link.sh --no-vehicle
 | 舵向找零 | `CAPTURE_STEER_ZERO=1 ./start_full_system.sh ...` |
 | 舵向 PD 调参 | `tools/run_steer_step_test.sh` |
 | 验证 CAN 链路 | `can_link_test` |
+| 验证 CAN-FD 双从站 | `canfd_link_test` |
 | 验证 ODrive 协议 | `odrive_protocol_test` |
 | 验证 BRT 编码器 | `encoder_byteorder_test`（dry）/ `encoder_ack_test`（实物） |
+| enc3 卡频抢救 | `enc3_recover` / `enc3_set_period` |
+| LinkX alias 写入 | `linkx_set_alias`（每次上电要重写） |
+| 4 轮速度标定调整 | 改 `crt_chassis.cpp:963` `kWheelSpeedCalib[4]` + rebuild |
+| 改最大遥控速度 | 改 `remote_node.cpp` `declare_parameter("max_speed", ...)` + rebuild |
 | 上机回归（限速短转） | `robot_test` |
+| 修复 var_data root 占用 | `sudo chown -R $USER:$USER var_data/` |

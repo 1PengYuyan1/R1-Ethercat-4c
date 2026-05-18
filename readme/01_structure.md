@@ -24,11 +24,14 @@ linkx_soem_demo/
 ├── CMakeLists.txt           显式列源码避免误链多 main
 ├── package.xml
 ├── include/linkx_soem_demo/
-│   ├── remote/              手柄外设抽象（Logitech F710）
+│   ├── remote/              手柄外设抽象（Logitech F710，XInput/DInput 自适应）
 │   └── vehicle_control/
 │       ├── middleware/      SOEM / linkx 协议封装 / PID 算法 / 数学工具
 │       ├── device/          硬件驱动层（编码器/电机/EtherCAT/OPS）
-│       ├── chariot/         底盘运动学与四舵轮控制
+│       ├── chariot/
+│       │   ├── chassis/     底盘运动学 + 编码器持久化 + 舵向校准（已抽离）
+│       │   ├── auto_pilot/  路径跟随 + 拐角软化 + drive_mode 切换
+│       │   └── clamp/       夹爪控制
 │       ├── interaction/     机器人交互（指令组织 + ROS2 遥控桥）
 │       └── task/            任务调度（1ms / 2ms / 100ms 周期）
 ├── src/
@@ -48,9 +51,11 @@ linkx_soem_demo/
 | --- | --- | --- |
 | middleware | 协议栈 / 通用算法 | `soem/*.c`、`linkx/linkx.c`、`Algorithm/alg_pid.cpp`、`math/math.h` |
 | device | 硬件抽象 | `Motor/dvc_odrive.{h,cpp}`、`Motor/dvc_motor_dm.{h,cpp}`、`Motor/dvc_encoder.{h,cpp}`、`OPS/dvc_ops.{h,cpp}`、`ecat_manager/`、`linkx4c_handler/`、`rt_timing/` |
-| chariot | 底盘逻辑 | `chassis/crt_chassis.{h,cpp}` —— 4 舵轮运动学、找零、力矩前馈、DOB |
-| interaction | 上位整合 | `robot/robot.{h,cpp}` —— 子系统聚合 + 周期回调 + ROS2 遥控桥 |
-| task | 任务调度 | `task/task.{h,cpp}` —— `Robot_Control_Loop()` 主循环入口 |
+| chariot/chassis | 底盘 + 舵向 | `chassis/crt_chassis.{h,cpp}` —— 4 舵轮运动学、drive_mode profile、`kWheelSpeedCalib`、输出端 slew。`chassis/steer_calibration.{h,cpp}` —— MIT 位置环 + slew + ω_des=0 + 滞回的找零序列。`chassis/encoder_persistence.{h,cpp}` —— `steer_zero_offsets.txt` / `steer_unwrapped_pulses.txt` 读写 + CRC32 |
+| chariot/auto_pilot | 路径跟随 | `auto_pilot/dvc_auto_pilot.{h,cpp}` —— 拐角软化 `V = seg_speed × cos²(Δθ/2)`、smoothstep 进出窗口、方向 lerp、自动切 `Drive_Mode_SEMI_AUTO` |
+| chariot/clamp | 夹爪 | `clamp/crt_clamp.{h,cpp}` |
+| interaction | 上位整合 | `robot/robot.{h,cpp}` —— 子系统聚合 + 周期回调 + ROS2 遥控桥（手动模式 cmd_omega 直接透传，无航向纠偏） |
+| task | 任务调度 | `task/task.{h,cpp}` —— `Robot_Control_Loop()` 主循环入口、双 LinkX (CAN-FD/classic) alias 绑定 |
 
 ### 2.2 主程序入口
 
@@ -75,10 +80,13 @@ linkx_bringup/
 | 参数 | 默认值 | 用途 |
 | --- | --- | --- |
 | `ifname` | `enp86s0` | EtherCAT 网卡 |
-| `max_speed` | `1.5` | 遥控最大线速度 [m/s] |
 | `start_vehicle_control` | `true` | 是否启动车体主控（false 时只跑遥控链路） |
 | `vehicle_prefix` | `""` | 主控前缀（用于 `sudo -E env ...`） |
 | `ros_nodes_prefix` | `""` | 全部 ROS 节点前缀 |
+
+> ⚠️ 2026-05-18 起 launch 不再声明 `max_speed` 参数。遥控最大线速度的唯一权威源是
+> `src/linkx_soem_demo/src/remote/remote_node.cpp` 的 `declare_parameter("max_speed", ...)`。
+> 想改默认速度直接动 C++ 代码 + rebuild；运行时仍可 `ros2 param set /remote_node max_speed <v>` 临时改。
 
 ## 4. `tools/` 调试脚本
 
@@ -89,6 +97,7 @@ linkx_bringup/
 | `run_steer_step_test.sh` | 舵向阶跃响应测试 |
 | `run_step_kd_sweep.sh` | 舵向 Kd 扫参 |
 | `run_remaining_tuning.sh` | 批量执行剩余调参用例 |
+| `analyze_steer_trace.py` | 解析 `steer_trace.cpp` 落盘的舵向跟踪 trace |
 
 ## 5. `var_data/` 持久化与分析
 

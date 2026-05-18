@@ -149,3 +149,23 @@ L mod 204800 == raw_true_cal + zero_offset_true   (mod 204800)
 LinkX TX 队列对同一 CAN ID 的多帧采用「**同 ID 更新**」策略（旧的覆盖新的）。
 对编码器 `set_*` 指令必须走 **quiet TX 路径**，避免被周期性 `read` 帧覆盖。
 代码里集中实现于 `dvc_encoder.{h,cpp}`，不要绕过。
+
+## 11. DM 舵向 ±PMAX 单圈相位 + wrap fix
+
+舵向 DM 电机（DM2325 / 2026-05-17 起的固件）只用 **±PMAX 单圈相位**反馈：
+`Get_Now_Radian()` 返回值始终钳在 `[-PMAX, +PMAX]`，跨过去后会从对面端跳回。
+
+因此 `Class_Chassis::Steer_To_Motor_Position`（`crt_chassis.cpp:471`）做的事是：
+
+1. 把 BRT 长轴 `phase`（无限累计）换算成期望电机位置 `motor_target`；
+2. **anchor 折回**到 `[-PMAX, +PMAX]` 与固件单圈相位对齐；
+3. 跨边界时只 clamp 不 wrap，否则电机会走长路震荡。
+
+> ⚠️ 不要写 `motor_target = wrap(motor_target, ±PMAX)`：
+> 之前曾因此让单方向转 ~1 圈卡死。
+
+翻轮决策（`crt_chassis.cpp:634-640`）相关：
+`overshoot = max(0, |motor_after_action| − 0.85×PMAX)`，离 ±PMAX 远时退化为
+原 `|delta| > π/2` 翻态判据；接近边界时 overshoot 把翻轮 cost 拉高，避免
+靠近 ±PMAX 的轮被单独翻 180° → yaw 漂。多轮决策已改为聚合（sum cost +
+group hysteresis），不再各轮独立 cost。

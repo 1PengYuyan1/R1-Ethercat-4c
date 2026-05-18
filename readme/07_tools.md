@@ -54,6 +54,12 @@ python3 tools/plot_feedback_wave.py \
 | `--y-min / --y-max` | 固定纵轴 |
 | `--height / --history / --refresh-hz` | 高度 / 历史长度 / 刷新率 |
 
+### 2.6 `tools/analyze_steer_trace.py`
+
+解析 `steer_trace.cpp`（`chariot/chassis/steer_trace.cpp`）落盘的舵向跟踪 trace
+文件，画出 setpoint / measured / err 波形。trace 文件路径在 `Class_Chassis` 内部决定，
+日常调参时建议跟 `steer_tuning` 配合使用。
+
 ## 3. `var_data/` 数据分析脚本
 
 ### 3.1 综合
@@ -125,3 +131,26 @@ cat var_data/steer_unwrapped_pulses.txt
 cat var_data/motor_calib_result.txt
 cat var_data/odrive_calib_result.txt
 ```
+
+### 4.6 修复 `var_data/*.txt` root 占用
+
+跑过 `sudo` 后 `var_data/*.txt` 归 root，下次非 sudo 跑会刷
+`[CHASSIS][PERSIST-FAIL]`。切模式前 `chown` 一次：
+
+```bash
+sudo chown -R $USER:$USER var_data/
+```
+
+## 5. 环境变量速查
+
+| 变量 | 默认 | 用途 |
+| --- | --- | --- |
+| `CAPTURE_STEER_ZERO` | 未设 | 1 时启动后捕捉舵向零点 |
+| `CAPTURE_STEER_ZERO_FORCE` | 未设 | 1 时强制覆盖已有零点 |
+| `STEER_SLEW_RATE_DEG_S` | 500 | MANUAL profile slew |
+| `STEER_LPF_ALPHA` | 0.30 | MANUAL profile LPF α |
+| `STEER_SLEW_RATE_DEG_S_SEMI` | 200 | SEMI_AUTO profile slew |
+| `STEER_LPF_ALPHA_SEMI` | 0.15 | SEMI_AUTO profile LPF α |
+| `WHEEL_OUTPUT_ACCEL` | 5.0 | 驱动轮加速 rad/s² |
+| `WHEEL_OUTPUT_DECEL` | 100.0 | 驱动轮减速 rad/s² |
+| `IFNAME` | `enp86s0` | 测试可执行的网卡名 |
