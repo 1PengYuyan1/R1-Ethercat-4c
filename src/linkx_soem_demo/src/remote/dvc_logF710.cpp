@@ -140,60 +140,61 @@ uint16_t Class_LogF710::Resolve_Button_Code(const std::vector<float> &axes, cons
     const bool dinput_like = Is_DInput_Layout(axes, buttons);
     const bool xinput_like = Is_XInput_Layout(axes, buttons);
 
-    // 与单片机端 Resolve_Key_Status 一致：返回单个键值码，不做位组合
-    if (dinput_like)
-    {
-        if (Is_Button_Pressed(buttons, 8U)) return LogF710_Key_Back;
-        if (Is_Button_Pressed(buttons, 9U)) return LogF710_Key_Start;
-    }
-    else if (xinput_like)
+    // —— 高优先级单键: Back / Start 永远占用使能门控,LB/RB 同时按下不生 Mod ——
+    if (xinput_like)
     {
         if (Is_Button_Pressed(buttons, 6U)) return LogF710_Key_Back;
         if (Is_Button_Pressed(buttons, 7U)) return LogF710_Key_Start;
     }
     else
     {
-        // 未知布局时优先保持历史 DInput 约定，避免误触 BACK
+        // DInput 与未知布局都按 8/9 取 Back/Start, 与历史约定一致
         if (Is_Button_Pressed(buttons, 8U)) return LogF710_Key_Back;
         if (Is_Button_Pressed(buttons, 9U)) return LogF710_Key_Start;
     }
 
-    if (Is_Button_Pressed(buttons, 4U)) return LogF710_Key_LB;
-    if (Is_Button_Pressed(buttons, 5U)) return LogF710_Key_RB;
+    // —— DInput 下 LT/RT 作单键早返回 (XInput 下 LT/RT 是 axis,在 Resolve_Speed_Scale 消费) ——
+    if (dinput_like)
+    {
+        if (Is_Button_Pressed(buttons, 6U)) return LogF710_Key_LT;
+        if (Is_Button_Pressed(buttons, 7U)) return LogF710_Key_RT;
+    }
+
+    // —— LB/RB 作 modifier 位 (与面键/方向键 OR 组合) ——
+    uint16_t code = LogF710_Key_IDLE;
+    if (Is_Button_Pressed(buttons, 4U)) code |= LogF710_Mod_LB;
+    if (Is_Button_Pressed(buttons, 5U)) code |= LogF710_Mod_RB;
+
+    // —— 面键 (互斥) ——
     if (xinput_like)
     {
-        // XInput: 0=A, 1=B, 2=X, 3=Y; LT/RT 是 axes[2]/axes[5], 已迁去 Resolve_Speed_Scale
-        if (Is_Button_Pressed(buttons, 0U)) return LogF710_Key_A;
-        if (Is_Button_Pressed(buttons, 1U)) return LogF710_Key_B;
-        if (Is_Button_Pressed(buttons, 2U)) return LogF710_Key_X;
-        if (Is_Button_Pressed(buttons, 3U)) return LogF710_Key_Y;
+        // XInput: 0=A, 1=B, 2=X, 3=Y
+        if      (Is_Button_Pressed(buttons, 0U)) code |= LogF710_Key_A;
+        else if (Is_Button_Pressed(buttons, 1U)) code |= LogF710_Key_B;
+        else if (Is_Button_Pressed(buttons, 2U)) code |= LogF710_Key_X;
+        else if (Is_Button_Pressed(buttons, 3U)) code |= LogF710_Key_Y;
     }
     else
     {
-        // DInput: 0=X, 1=A, 2=B, 3=Y; LT/RT 是 buttons[6]/[7] 离散按钮
-        if (Is_Button_Pressed(buttons, 0U)) return LogF710_Key_X;
-        if (Is_Button_Pressed(buttons, 1U)) return LogF710_Key_A;
-        if (Is_Button_Pressed(buttons, 2U)) return LogF710_Key_B;
-        if (Is_Button_Pressed(buttons, 3U)) return LogF710_Key_Y;
-        if (dinput_like)
-        {
-            if (Is_Button_Pressed(buttons, 6U)) return LogF710_Key_LT;
-            if (Is_Button_Pressed(buttons, 7U)) return LogF710_Key_RT;
-        }
+        // DInput: 0=X, 1=A, 2=B, 3=Y
+        if      (Is_Button_Pressed(buttons, 0U)) code |= LogF710_Key_X;
+        else if (Is_Button_Pressed(buttons, 1U)) code |= LogF710_Key_A;
+        else if (Is_Button_Pressed(buttons, 2U)) code |= LogF710_Key_B;
+        else if (Is_Button_Pressed(buttons, 3U)) code |= LogF710_Key_Y;
     }
 
-    // 十字键按布局解算，未知布局时回退 DInput。
+    // —— 方向键 (互斥, OR 进 code) ——
     uint16_t dpad_key = LogF710_Key_IDLE;
     if (xinput_like)
     {
-        if (Resolve_Dpad_From_Axes(axes, 6U, 7U, &dpad_key)) return dpad_key;
+        if (Resolve_Dpad_From_Axes(axes, 6U, 7U, &dpad_key)) code |= dpad_key;
     }
     else
     {
-        if (Resolve_Dpad_From_Axes(axes, 4U, 5U, &dpad_key)) return dpad_key;
+        if (Resolve_Dpad_From_Axes(axes, 4U, 5U, &dpad_key)) code |= dpad_key;
     }
 
-    return LogF710_Key_IDLE;
+    return code;
 }
 
 void Class_LogF710::Update_Control_Enable(uint16_t key_code, uint32_t dt_ms)

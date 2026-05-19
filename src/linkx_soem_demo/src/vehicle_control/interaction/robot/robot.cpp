@@ -408,7 +408,13 @@ bool Class_Robot::_Update_Manual_Enable_State(uint16_t key_code)
 
 /**
  * @brief 功能键边沿动作
- *        仅在控制使能时响应，目前为预留 hook（导航/机构动作）。
+ *        仅在控制使能时响应。三段分发:
+ *          1) LB modifier 组合 (机械臂占位):LB+X/Y/A/B/Up/Down/Left/Right
+ *          2) RB modifier 组合 (龙门架占位):RB+X/Y/A/B/Up/Down/Left/Right
+ *          3) 单键 (LB/RB 单按已不分发,只做 modifier)
+ *
+ *        组合识别:rising_key 与 LogF710_Mod_LB/RB 相与判 modifier 是否按下;
+ *        要求至少还有一个非 modifier 位,LB 或 RB 单按 (= 0x0008 / 0x0080) 不进组合分支。
  * @param key_code   当前按键
  * @param is_enabled 是否处于手动使能态
  */
@@ -419,9 +425,48 @@ void Class_Robot::_Process_Function_Key_Edge(uint16_t key_code, bool is_enabled)
     uint16_t rising_key = LogF710_Key_IDLE;
     if (!logf710_remote_.Check_Key_Rising_Edge(key_code, &rising_key)) return;
 
+    // ============ LB modifier 组合 → 机械臂 (占位) ============
+    if ((rising_key & LogF710_Mod_LB) && (rising_key != LogF710_Mod_LB))
+    {
+        const uint16_t base = static_cast<uint16_t>(rising_key & ~LogF710_Mod_LB);
+        switch (base)
+        {
+        case LogF710_Key_X:     std::cout << "[ARM] LB+X: (placeholder)"     << std::endl; break;
+        case LogF710_Key_Y:     std::cout << "[ARM] LB+Y: (placeholder)"     << std::endl; break;
+        case LogF710_Key_A:     std::cout << "[ARM] LB+A: (placeholder)"     << std::endl; break;
+        case LogF710_Key_B:     std::cout << "[ARM] LB+B: (placeholder)"     << std::endl; break;
+        case LogF710_Key_Up:    std::cout << "[ARM] LB+Up: (placeholder)"    << std::endl; break;
+        case LogF710_Key_Down:  std::cout << "[ARM] LB+Down: (placeholder)"  << std::endl; break;
+        case LogF710_Key_Left:  std::cout << "[ARM] LB+Left: (placeholder)"  << std::endl; break;
+        case LogF710_Key_Right: std::cout << "[ARM] LB+Right: (placeholder)" << std::endl; break;
+        default: break;
+        }
+        return;
+    }
+
+    // ============ RB modifier 组合 → 龙门架 (占位) ============
+    if ((rising_key & LogF710_Mod_RB) && (rising_key != LogF710_Mod_RB))
+    {
+        const uint16_t base = static_cast<uint16_t>(rising_key & ~LogF710_Mod_RB);
+        switch (base)
+        {
+        case LogF710_Key_X:     std::cout << "[GANTRY] RB+X: (placeholder)"     << std::endl; break;
+        case LogF710_Key_Y:     std::cout << "[GANTRY] RB+Y: (placeholder)"     << std::endl; break;
+        case LogF710_Key_A:     std::cout << "[GANTRY] RB+A: (placeholder)"     << std::endl; break;
+        case LogF710_Key_B:     std::cout << "[GANTRY] RB+B: (placeholder)"     << std::endl; break;
+        case LogF710_Key_Up:    std::cout << "[GANTRY] RB+Up: (placeholder)"    << std::endl; break;
+        case LogF710_Key_Down:  std::cout << "[GANTRY] RB+Down: (placeholder)"  << std::endl; break;
+        case LogF710_Key_Left:  std::cout << "[GANTRY] RB+Left: (placeholder)"  << std::endl; break;
+        case LogF710_Key_Right: std::cout << "[GANTRY] RB+Right: (placeholder)" << std::endl; break;
+        default: break;
+        }
+        return;
+    }
+
+    // ============ 单键分发 (LB/RB 单按已不再触发任何动作,纯 modifier) ============
     switch (rising_key)
     {
-    // ============ AUTO-PILOT TRIGGERS ============
+    // ---- AUTO-PILOT TRIGGERS ----
     case LogF710_Key_X:  Auto_Pilot.Stop();    std::cout << "[ROBOT] Key X: Auto-Pilot STOP"     << std::endl; break;
     case LogF710_Key_Y:  Auto_Pilot.Start(0);  std::cout << "[ROBOT] Key Y: Auto-Pilot path 0"   << std::endl; break;
     case LogF710_Key_A:
@@ -433,13 +478,6 @@ void Class_Robot::_Process_Function_Key_Edge(uint16_t key_code, bool is_enabled)
         // 已迁移到 _Chassis_Control() 中按住持续 push (LinkX TX slot 不自清,边沿单 push 会被
         // 固件每 cycle 重发到总线; 改为按住才入队,新鲜帧覆盖旧帧)
         break;
-    case LogF710_Key_LB: Auto_Pilot.Start(2);  std::cout << "[ROBOT] Key LB: Auto-Pilot path 2"  << std::endl; break;
-    case LogF710_Key_RB:
-        // 夹爪压合:大+小 Pitch 同时去 POS2
-        Clamp.Set_Pitch_Large_State(L_PITCH_POS2);
-        Clamp.Set_Pitch_Small_State(S_PITCH_POS2);
-        std::cout << "[ROBOT] Key RB: Clamp -> POS2 (close)" << std::endl;
-        break;
     case LogF710_Key_LT:
         // 夹爪复位:大+小 Pitch 同时回 POS1
         // 注意:LT 仅在 DInput 布局下作为按键被解析,XInput 模式下变 axis 不响应
@@ -447,7 +485,7 @@ void Class_Robot::_Process_Function_Key_Edge(uint16_t key_code, bool is_enabled)
         Clamp.Set_Pitch_Small_State(S_PITCH_POS1);
         std::cout << "[ROBOT] Key LT: Clamp -> POS1 (open)" << std::endl;
         break;
-    // ============ 预留按键 (无任务,仅打印边沿) ============
+    // ---- 预留按键 (无任务,仅打印边沿) ----
     // RT: XInput 下为 axis,仅 DInput 布局下作为按键被解析
     // Back/Start: 长按已被 _Update_Manual_Enable 消费 (disable/enable);短按时才进入这里
     case LogF710_Key_RT:    std::cout << "[ROBOT] Key RT: (unassigned)"    << std::endl; break;
