@@ -10,34 +10,26 @@ enum Enum_Clamp_Control_Type {
 enum Enum_Clamp_Pitch_Large_State {
   L_PITCH_POS1 = 0,
   L_PITCH_POS2,
-  L_PITCH_POS3,
-  L_PITCH_POS4,
-  L_PITCH_POS_LIFT  // 回收路径中间抬高 waypoint (q1=0.8, 大臂往后倒一点)
+  L_PITCH_POS_FOLDED  // 折叠收姿 (q1=1.555 大臂垂直向上, 末端在肩正上方 +16cm)
 };
 enum Enum_Clamp_Pitch_Small_State {
   S_PITCH_POS1 = 0,
   S_PITCH_POS2,
-  S_PITCH_POS3,
-  S_PITCH_POS4,
-  S_PITCH_POS_LIFT  // 回收路径中间抬高 waypoint (q2=-0.6, 小臂展开抬末端)
+  S_PITCH_POS_FOLDED  // 折叠收姿 (q2=-3.112 小臂相对大臂折回 ~180°)
 };
 
-// 取放序列状态 (5 个 STEP + IDLE 末态;状态名表示"已进入该步、正在等待
+// 取放序列状态 (3 个 STEP + IDLE 末态;状态名表示"已进入该步、正在等待
 // dwell/段满"):
 //   触发瞬间            : sequence_state_=STEP1, 位置保持 POS1
-//   STEP1 →[dwell1]→  STEP2 : 双轴目标 POS2 (抓取位)
-//   STEP2 →[dwell2]→  STEP3 : 双轴目标 POS3 (收回中转)
-//   STEP3 →[段减速]→  STEP4 : 双轴目标 POS4 (收回顶档, blend 不停顿)
-//   STEP4 →[段减速]→  STEP5 : 双轴目标 POS_LIFT (双轴协同抬末端 +7cm, blend)
-//   STEP5 →[段减速]→  IDLE  : 双轴目标 POS1 (回收末态, blend 不停顿)
+//   STEP1 →[立即]→    STEP2 : 双轴目标 POS2 (抓取位)
+//   STEP2 →[dwell]→   STEP3 : 双轴目标 POS_FOLDED (折叠收姿, blend 不停顿)
+//   STEP3 →[段减速]→  IDLE  : 双轴目标 POS1 (回水平向后, blend 不停顿)
 // 气夹爪不由本序列驱动, 完全由外部 (Key B toggle) 手动控制
 enum Enum_Clamp_Sequence_State {
   CLAMP_SEQ_IDLE = 0,
   CLAMP_SEQ_STEP1,
   CLAMP_SEQ_STEP2,
-  CLAMP_SEQ_STEP3,
-  CLAMP_SEQ_STEP4,
-  CLAMP_SEQ_STEP5
+  CLAMP_SEQ_STEP3
 };
 
 // 段插值模式:PTP=关节空间线性,LIN=笛卡尔空间直线 + 每 cycle IK
@@ -128,7 +120,7 @@ class Class_Clamp {
   }
 
   /// 触发取放序列(按 A 调用);仅在 ENABLE 状态下生效;序列进行中重复触发被忽略
-  /// 流程: POS1 → POS2 → POS3 → POS4 → POS1(末态), 各步 dwell 见 _Step_Sequence
+  /// 流程: POS1 → POS2(抓) → POS_FOLDED(折叠收姿) → POS1(末态)
   /// 气夹爪不参与本序列, 由 Key B 手动 toggle 独立控制
   void Trigger_Pick_Place_Sequence();
   inline bool Is_Sequence_Active() const {
@@ -148,34 +140,18 @@ class Class_Clamp {
   Enum_Clamp_Pitch_Small_State current_pitch_small_state = S_PITCH_POS1;
 
   // === 关节空间 POS 角度 (rad) ===
-  // POS1 初始/回收末态 = 水平向后; POS2 抓取位 = 前方下沉; POS3 中转 =
-  // 头顶偏前; POS4 顶档 = 后上方 (释放/搬运)。物理标定来源同 r1.2,大轴增大 →
-  // 顺时针抬起, 小轴减小 → 肘相对大臂向下折,POS2 小轴 -4.2rad 等价单圈
-  // +2.083rad。
+  // POS1 初始/回收末态 = 水平向后 (q=0,0);
+  // POS2 抓取位 = 前方下沉 (q1=2.3, q2=-4.2, q2 单圈等价 +2.083 即 elbow_up);
+  // POS_FOLDED 折叠收姿 = 大臂垂直向上 + 小臂相对折回 ~180°
+  //   (q1=π/2-0.016≈1.555, q2≈-π+0.03≈-3.112, q2 ∈ (-π,0) 即 elbow_down)
+  //   末端 FK=(-0.7cm, +16cm) 在肩正上方; POS2→POS_FOLDED 跨 elbow 支自动判 PTP
   float pitch_large_pos1_angle = 0.0f;
   float pitch_large_pos2_angle = 2.3f;
-  float pitch_large_pos3_angle = 1.6f;
-  float pitch_large_pos4_angle = 1.2f;
+  float pitch_large_folded_angle = 1.555f;
 
   float pitch_small_pos1_angle = 0.0f;
   float pitch_small_pos2_angle = -4.2f;
-  float pitch_small_pos3_angle = -3.5f;
-  float pitch_small_pos4_angle = -2.0f;
-
-  // 回收路径中间抬高 waypoint (POS4→POS1 之间插入):
-  //   POS4 末端 (-22.8, +18.3) → LIFT 末端 (-38.0, +26.1) cm → POS1 (-48, 0)
-  //   双轴协同: 大臂 q1 从 1.2 减到 0.8 (往后倒一点), 同时小臂 q2 从 -2.0 增到
-  //   -0.6 (展开抬高), 末端走圈弧上势, 比 POS4 高 ~7.8cm, 避免长杆扫到机身侧面
-  //
-  // ★ q1 和 q2 必须配套改: q1=0.8 时大臂往后倒会让末端 y 下降, q2 必须更朝 0
-  //   方向(小臂展开)补偿才能"抬"。q1=0.8 配 q2 表:
-  //     q2=-1.5 → y=+12.6cm (反而比 POS4 低 5.7cm — 不抬)
-  //     q2=-1.0 → y=+18.0cm (几乎平 POS4)
-  //     q2=-0.6 → y=+26.1cm (抬 7.8cm, 推荐)
-  //     q2=-0.3 → y=+30.5cm (抬 12.2cm)
-  //   要更大幅度抬, 同时减小 |q2|; 嫌幅度大, q2 朝更负 (但别越过 -1.0)。
-  float pitch_large_lift_angle = 0.8f;
-  float pitch_small_lift_angle = -0.6f;
+  float pitch_small_folded_angle = -3.112f;
 
   // 当前下发的关节角(随段进度更新);掉线/失能时同步回真实角度防切回突变
   float current_pitch_large_angle = 0.0f;
@@ -248,6 +224,9 @@ class Class_Clamp {
   // trajectory blending: 上段进入减速时被 _Step_Sequence 提前切,记录当前归一化
   // 速度作为下段初速度;下段 _Start_Segment 用完后清零。
   float next_segment_v0_norm_ = 0.0f;
+  // 下段速度/加速度缩放因子 (1.0=满速); _Step_Sequence 在切步前设,
+  // _Start_Segment 用完即清回 1.0。用于末段回 POS1 这种"要慢要稳"的场景。
+  float next_segment_speed_scale_ = 1.0f;
 
   // === GravComp 标定调试模式 ===
   //   OFF             - 正常运行, 用 pitch_*_grav_K 做补偿

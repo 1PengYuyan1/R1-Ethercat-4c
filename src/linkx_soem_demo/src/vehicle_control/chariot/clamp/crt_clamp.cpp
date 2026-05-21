@@ -432,16 +432,12 @@ void Class_Clamp::_Resolve_Pos_Targets(float& q1_target,
   switch (current_pitch_large_state) {
     case L_PITCH_POS1: q1_target = pitch_large_pos1_angle; break;
     case L_PITCH_POS2: q1_target = pitch_large_pos2_angle; break;
-    case L_PITCH_POS3: q1_target = pitch_large_pos3_angle; break;
-    case L_PITCH_POS4: q1_target = pitch_large_pos4_angle; break;
-    case L_PITCH_POS_LIFT: q1_target = pitch_large_lift_angle; break;
+    case L_PITCH_POS_FOLDED: q1_target = pitch_large_folded_angle; break;
   }
   switch (current_pitch_small_state) {
     case S_PITCH_POS1: q2_target = pitch_small_pos1_angle; break;
     case S_PITCH_POS2: q2_target = pitch_small_pos2_angle; break;
-    case S_PITCH_POS3: q2_target = pitch_small_pos3_angle; break;
-    case S_PITCH_POS4: q2_target = pitch_small_pos4_angle; break;
-    case S_PITCH_POS_LIFT: q2_target = pitch_small_lift_angle; break;
+    case S_PITCH_POS_FOLDED: q2_target = pitch_small_folded_angle; break;
   }
 }
 
@@ -499,8 +495,15 @@ void Class_Clamp::_Start_Segment(float q1_target, float q2_target,
     a_norm = std::fmin(a_norm, max_accel_pitch_small / dq2);
   }
 
-  segment_profile_.Plan(1.0f, v_norm, a_norm, next_segment_v0_norm_);
-  next_segment_v0_norm_ = 0.0f;  // 用完即清,默认下段从 0 起
+  segment_profile_.Plan(1.0f, v_norm * next_segment_speed_scale_,
+                        a_norm * next_segment_speed_scale_,
+                        std::fmin(next_segment_v0_norm_,
+                                  v_norm * next_segment_speed_scale_));
+  // v0 > v_max 时强制 clamp: 不 clamp 会让 Plan 算出负 t_acc, Sample(0) 返回
+  // 负 s 即 setpoint 反向跳变 (抽搐 bug). 代价: 段开头有关节速度小跳 (~0.3rad/s),
+  // 但比 30° setpoint 跳好太多
+  next_segment_v0_norm_ = 0.0f;       // 用完即清, 默认下段从 0 起
+  next_segment_speed_scale_ = 1.0f;   // 用完即清, 默认下段满速
   segment_t_ = 0.0f;
   segment_active_ = true;
 }
@@ -603,14 +606,16 @@ void Class_Clamp::Trigger_Pick_Place_Sequence() {
 }
 
 // 2ms 节拍推进序列:
-//   STEP1 (启动延迟) / STEP2 (抓取等待气夹爪闭合) 用固定 dwell tick;
-//   STEP3 / STEP4 (抓后搬运/收回) 用"段进入减速即切" — trajectory blending:
-//     下段以上段当前归一化速度起规划,中间无 0 速度点,杆/夹爪不停顿过 POS
+//   STEP1 (按 A 立即) / STEP2 (到 POS2 等气夹爪闭合) 用固定 dwell tick;
+//   STEP3 (POS_FOLDED → POS1) 用"段进入减速即切" + blend, 全程无 0 速点。
+//   抓后两段 (POS2→POS_FOLDED, POS_FOLDED→POS1) 共用 speed_scale=0.5,
+//   blend 时 v0=v_max_new 完美对齐, 速度连续无跳变, 整体慢稳。
 void Class_Clamp::_Step_Sequence() {
   if (sequence_state_ == CLAMP_SEQ_IDLE) return;
 
   constexpr uint32_t kStep1Dwell = 0U;     //  按 A 立刻起动, 无启动延迟
   constexpr uint32_t kStep2Dwell = 1500U;  // 1500ms (到 POS2 后留抓取时间)
+  constexpr float kPostGraspScale = 0.5f;  // 抓后两段共用速度缩放, 慢稳
 
   bool advance = false;
   switch (sequence_state_) {
@@ -621,9 +626,7 @@ void Class_Clamp::_Step_Sequence() {
       advance = (++sequence_tick_ >= kStep2Dwell);
       break;
     case CLAMP_SEQ_STEP3:
-    case CLAMP_SEQ_STEP4:
-    case CLAMP_SEQ_STEP5:
-      // 段 done 或进入减速 → 切下段;若是减速触发则记录当前 v 给下段做 blend
+      // 进入减速即切 + 记录 v0 给下段 blend
       advance = !segment_active_ ||
                 segment_profile_.In_Deceleration(segment_t_);
       break;
@@ -635,7 +638,7 @@ void Class_Clamp::_Step_Sequence() {
   if (!advance) return;
   sequence_tick_ = 0;
 
-  // blend 衔接: 若当前段还在执行(未 done),把当前归一化速度传给下段做初速度
+  // blend 衔接: 若当前段还在执行(未 done), 把当前归一化速度传给下段做初速度
   if (segment_active_ && !segment_profile_.Done(segment_t_)) {
     next_segment_v0_norm_ = segment_profile_.Sample_Velocity(segment_t_);
   } else {
@@ -644,27 +647,21 @@ void Class_Clamp::_Step_Sequence() {
 
   switch (sequence_state_) {
     case CLAMP_SEQ_STEP1:
+      // POS1 → POS2 抓取段: 满速 (用户没抱怨这段速度)
       current_pitch_large_state = L_PITCH_POS2;
       current_pitch_small_state = S_PITCH_POS2;
       sequence_state_ = CLAMP_SEQ_STEP2;
       break;
     case CLAMP_SEQ_STEP2:
-      current_pitch_large_state = L_PITCH_POS3;
-      current_pitch_small_state = S_PITCH_POS3;
+      // POS2 → POS_FOLDED 段: 半速 (跟末段同 scale, 下面 blend 时 v 对齐)
+      next_segment_speed_scale_ = kPostGraspScale;
+      current_pitch_large_state = L_PITCH_POS_FOLDED;
+      current_pitch_small_state = S_PITCH_POS_FOLDED;
       sequence_state_ = CLAMP_SEQ_STEP3;
       break;
     case CLAMP_SEQ_STEP3:
-      current_pitch_large_state = L_PITCH_POS4;
-      current_pitch_small_state = S_PITCH_POS4;
-      sequence_state_ = CLAMP_SEQ_STEP4;
-      break;
-    case CLAMP_SEQ_STEP4:
-      // 回收前先抬高 (双轴协同圈弧), 避免长杆扫到机身;blend 不停顿
-      current_pitch_large_state = L_PITCH_POS_LIFT;
-      current_pitch_small_state = S_PITCH_POS_LIFT;
-      sequence_state_ = CLAMP_SEQ_STEP5;
-      break;
-    case CLAMP_SEQ_STEP5:
+      // POS_FOLDED → POS1 末段: 同 scale → v0=v_max_new 无速度跳变, 平稳衔接
+      next_segment_speed_scale_ = kPostGraspScale;
       current_pitch_large_state = L_PITCH_POS1;
       current_pitch_small_state = S_PITCH_POS1;
       sequence_state_ = CLAMP_SEQ_IDLE;
