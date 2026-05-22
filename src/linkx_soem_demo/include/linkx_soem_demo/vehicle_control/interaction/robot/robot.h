@@ -4,6 +4,7 @@
 #include "crt_chassis.h"
 #include "crt_clamp.h"
 #include "dvc_auto_pilot.h"
+#include "dvc_manual_yaw_hold.h"
 #include "linkx_soem_demo/remote/dvc_logF710.h"
 #include <atomic>
 #include <cstdint>
@@ -22,6 +23,7 @@ public:
     /* ===== 子系统 ===== */
     Class_Chassis Chassis;
     Class_Auto_Pilot Auto_Pilot;
+    Class_Manual_Heading_Hold Manual_Yaw_Hold;
     Class_Clamp Clamp;
 
     /* ===== 生命周期 ===== */
@@ -75,9 +77,6 @@ protected:
     std::thread            ros_spin_thread_;
     std::atomic<bool>      ros_bridge_running_{false};
     bool                   ros_initialized_here_ = false;
-
-    /* ===== Key B 透传:按住每 tick 重入队 (LinkX TX slot 不自清,持续 push 保持帧新鲜) ===== */
-    bool b_key_was_held_ = false;
 
     /* ===== 调试观测缓存 ===== */
     uint16_t debug_remote_key_code_   = 0;

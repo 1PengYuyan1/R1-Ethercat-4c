@@ -54,7 +54,7 @@ constexpr bool kEnableSteerUnwrappedSave  = true;
 constexpr const char *kDefaultVarDataFile = "var_data/live_variables.log";
 constexpr const char *kDefaultVelocityLogFile = "var_data/odrive_velocity.csv";
 constexpr uint32_t kVelocityLogPeriodMs = 10;   ///< 速度记录周期 10 ms (100 Hz)
-constexpr float    kWheelRadius         = 0.018f;
+constexpr float    kWheelRadius         = 0.058f;  // 直径 116mm (2026-05-22 实测修正,见 [[cmd-to-actual-speed-16x]])
 
 std::ofstream g_var_data_stream;        ///< 仪表盘镜像日志（懒打开）
 bool          g_var_data_stream_inited = false;

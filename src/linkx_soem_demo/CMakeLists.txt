@@ -24,6 +24,7 @@ set(SOEM_SRC_FILES
     src/vehicle_control/chariot/chassis/steer_calibration.cpp
     src/vehicle_control/chariot/clamp/crt_clamp.cpp
     src/vehicle_control/chariot/auto_pilot/dvc_auto_pilot.cpp
+    src/vehicle_control/chariot/manual_yaw_hold/dvc_manual_yaw_hold.cpp
     src/vehicle_control/device/Motor/dvc_odrive.cpp
     src/vehicle_control/device/Motor/dvc_encoder.cpp
     src/vehicle_control/device/Motor/dvc_motor_dm.cpp
@@ -78,6 +79,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     include/linkx_soem_demo/vehicle_control/chariot/chassis
     include/linkx_soem_demo/vehicle_control/chariot/clamp
     include/linkx_soem_demo/vehicle_control/chariot/auto_pilot
+    include/linkx_soem_demo/vehicle_control/chariot/manual_yaw_hold
     include/linkx_soem_demo/vehicle_control/interaction/robot
     include/linkx_soem_demo/vehicle_control/task/task
 )
@@ -342,6 +344,64 @@ target_include_directories(motor_calib PRIVATE
     include/linkx_soem_demo/vehicle_control/chariot/auto_pilot
 )
 target_link_libraries(motor_calib
+    pcap
+    pthread
+    rt
+    m
+)
+
+# 4 舵向电机并行 摩擦力测试 (静摩擦 + 动摩擦)
+# 一次性同时测 4 个 DM 舵向电机的 Ts/Tc, 单轮 ≤10s, 轮间 settle 后再测
+set(STEER_FRIC4_SRC_FILES
+    src/test_mains/steer_friction_4wheel_main.cpp
+    src/vehicle_control/chariot/chassis/crt_chassis.cpp
+    src/vehicle_control/chariot/chassis/encoder_persistence.cpp
+    src/vehicle_control/chariot/chassis/steer_trace.cpp
+    src/vehicle_control/chariot/chassis/steer_calibration.cpp
+    src/vehicle_control/chariot/auto_pilot/dvc_auto_pilot.cpp
+    src/vehicle_control/device/Motor/dvc_odrive.cpp
+    src/vehicle_control/device/Motor/dvc_encoder.cpp
+    src/vehicle_control/device/Motor/dvc_motor_dm.cpp
+    src/vehicle_control/device/OPS/dvc_ops.cpp
+    src/vehicle_control/device/ecat_manager/ecat_manager.c
+    src/vehicle_control/device/linkx4c_handler/linkx4c_handler.c
+    src/vehicle_control/device/rt_timing/rt_timing.c
+    src/vehicle_control/middleware/Algorithm/alg_pid.cpp
+    src/vehicle_control/middleware/linkx/linkx.c
+    src/vehicle_control/middleware/soem/ec_base.c
+    src/vehicle_control/middleware/soem/ec_coe.c
+    src/vehicle_control/middleware/soem/ec_config.c
+    src/vehicle_control/middleware/soem/ec_dc.c
+    src/vehicle_control/middleware/soem/ec_eoe.c
+    src/vehicle_control/middleware/soem/ec_foe.c
+    src/vehicle_control/middleware/soem/ec_main.c
+    src/vehicle_control/middleware/soem/ec_print.c
+    src/vehicle_control/middleware/soem/ec_soe.c
+    src/vehicle_control/middleware/soem/nicdrv.c
+    src/vehicle_control/middleware/soem/osal.c
+    src/vehicle_control/middleware/soem/oshw.c
+)
+add_executable(steer_friction_4wheel ${STEER_FRIC4_SRC_FILES})
+target_include_directories(steer_friction_4wheel PRIVATE
+    include
+    include/linkx_soem_demo
+    include/linkx_soem_demo/vehicle_control
+    include/linkx_soem_demo/vehicle_control/middleware
+    include/linkx_soem_demo/vehicle_control/device
+    include/linkx_soem_demo/vehicle_control/middleware/soem
+    include/linkx_soem_demo/vehicle_control/middleware/linkx
+    include/linkx_soem_demo/vehicle_control/middleware/npcap
+    include/linkx_soem_demo/vehicle_control/middleware/math
+    include/linkx_soem_demo/vehicle_control/middleware/Algorithm
+    include/linkx_soem_demo/vehicle_control/device/ecat_manager
+    include/linkx_soem_demo/vehicle_control/device/linkx4c_handler
+    include/linkx_soem_demo/vehicle_control/device/rt_timing
+    include/linkx_soem_demo/vehicle_control/device/Motor
+    include/linkx_soem_demo/vehicle_control/device/OPS
+    include/linkx_soem_demo/vehicle_control/chariot/chassis
+    include/linkx_soem_demo/vehicle_control/chariot/auto_pilot
+)
+target_link_libraries(steer_friction_4wheel
     pcap
     pthread
     rt
@@ -669,6 +729,96 @@ target_link_libraries(linkx_set_alias
     m
 )
 
+# 夹爪 (Pitch_Large + Pitch_Small) 只读遥测: 仅周期发 DM Enter 帧, 把 Get_Now_Radian
+# 通过 UDP 广播给 Python 端动画 (tools/clamp_arm_visualizer.py --udp-port 5005)
+# 用法: sudo ./build/linkx_soem_demo/clamp_telemetry enp86s0 [--port 5005] [--rate 50]
+set(CLAMP_TELEMETRY_SRC_FILES
+    src/test_mains/clamp_telemetry_main.cpp
+    src/vehicle_control/device/Motor/dvc_motor_dm.cpp
+    src/vehicle_control/device/ecat_manager/ecat_manager.c
+    src/vehicle_control/device/linkx4c_handler/linkx4c_handler.c
+    src/vehicle_control/device/rt_timing/rt_timing.c
+    src/vehicle_control/middleware/linkx/linkx.c
+    src/vehicle_control/middleware/soem/ec_base.c
+    src/vehicle_control/middleware/soem/ec_coe.c
+    src/vehicle_control/middleware/soem/ec_config.c
+    src/vehicle_control/middleware/soem/ec_dc.c
+    src/vehicle_control/middleware/soem/ec_eoe.c
+    src/vehicle_control/middleware/soem/ec_foe.c
+    src/vehicle_control/middleware/soem/ec_main.c
+    src/vehicle_control/middleware/soem/ec_print.c
+    src/vehicle_control/middleware/soem/ec_soe.c
+    src/vehicle_control/middleware/soem/nicdrv.c
+    src/vehicle_control/middleware/soem/osal.c
+    src/vehicle_control/middleware/soem/oshw.c
+)
+add_executable(clamp_telemetry ${CLAMP_TELEMETRY_SRC_FILES})
+target_include_directories(clamp_telemetry PRIVATE
+    include
+    include/linkx_soem_demo
+    include/linkx_soem_demo/vehicle_control
+    include/linkx_soem_demo/vehicle_control/middleware
+    include/linkx_soem_demo/vehicle_control/middleware/soem
+    include/linkx_soem_demo/vehicle_control/middleware/linkx
+    include/linkx_soem_demo/vehicle_control/middleware/npcap
+    include/linkx_soem_demo/vehicle_control/middleware/math
+    include/linkx_soem_demo/vehicle_control/device/ecat_manager
+    include/linkx_soem_demo/vehicle_control/device/linkx4c_handler
+    include/linkx_soem_demo/vehicle_control/device/rt_timing
+    include/linkx_soem_demo/vehicle_control/device/Motor
+)
+target_link_libraries(clamp_telemetry
+    pcap
+    pthread
+    rt
+    m
+)
+
+# 夹爪位置实时监视器: 只读, 终端用 ANSI 控制码刷两行显示 Pitch_Large/Small
+# 位置 + 速度 + 力矩 + 温度 + alive 状态.
+# 用法: sudo ./build/linkx_soem_demo/clamp_position_monitor enp86s0 [--rate 20]
+set(CLAMP_POSITION_MONITOR_SRC_FILES
+    src/test_mains/clamp_position_monitor_main.cpp
+    src/vehicle_control/device/Motor/dvc_motor_dm.cpp
+    src/vehicle_control/device/ecat_manager/ecat_manager.c
+    src/vehicle_control/device/linkx4c_handler/linkx4c_handler.c
+    src/vehicle_control/device/rt_timing/rt_timing.c
+    src/vehicle_control/middleware/linkx/linkx.c
+    src/vehicle_control/middleware/soem/ec_base.c
+    src/vehicle_control/middleware/soem/ec_coe.c
+    src/vehicle_control/middleware/soem/ec_config.c
+    src/vehicle_control/middleware/soem/ec_dc.c
+    src/vehicle_control/middleware/soem/ec_eoe.c
+    src/vehicle_control/middleware/soem/ec_foe.c
+    src/vehicle_control/middleware/soem/ec_main.c
+    src/vehicle_control/middleware/soem/ec_print.c
+    src/vehicle_control/middleware/soem/ec_soe.c
+    src/vehicle_control/middleware/soem/nicdrv.c
+    src/vehicle_control/middleware/soem/osal.c
+    src/vehicle_control/middleware/soem/oshw.c
+)
+add_executable(clamp_position_monitor ${CLAMP_POSITION_MONITOR_SRC_FILES})
+target_include_directories(clamp_position_monitor PRIVATE
+    include
+    include/linkx_soem_demo
+    include/linkx_soem_demo/vehicle_control
+    include/linkx_soem_demo/vehicle_control/middleware
+    include/linkx_soem_demo/vehicle_control/middleware/soem
+    include/linkx_soem_demo/vehicle_control/middleware/linkx
+    include/linkx_soem_demo/vehicle_control/middleware/npcap
+    include/linkx_soem_demo/vehicle_control/middleware/math
+    include/linkx_soem_demo/vehicle_control/device/ecat_manager
+    include/linkx_soem_demo/vehicle_control/device/linkx4c_handler
+    include/linkx_soem_demo/vehicle_control/device/rt_timing
+    include/linkx_soem_demo/vehicle_control/device/Motor
+)
+target_link_libraries(clamp_position_monitor
+    pcap
+    pthread
+    rt
+    m
+)
+
 # Class_Robot 真实上机回归测试程序：顺序自动跑全套测试，限速短转，自动停。
 # 用法： sudo ./build/linkx_soem_demo/robot_test enp86s0
 set(ROBOT_TEST_SRC_FILES
@@ -680,6 +830,7 @@ set(ROBOT_TEST_SRC_FILES
     src/vehicle_control/chariot/chassis/steer_calibration.cpp
     src/vehicle_control/chariot/clamp/crt_clamp.cpp
     src/vehicle_control/chariot/auto_pilot/dvc_auto_pilot.cpp
+    src/vehicle_control/chariot/manual_yaw_hold/dvc_manual_yaw_hold.cpp
     src/vehicle_control/device/Motor/dvc_odrive.cpp
     src/vehicle_control/device/Motor/dvc_encoder.cpp
     src/vehicle_control/device/Motor/dvc_motor_dm.cpp
@@ -724,6 +875,7 @@ target_include_directories(robot_test PRIVATE
     include/linkx_soem_demo/vehicle_control/chariot/chassis
     include/linkx_soem_demo/vehicle_control/chariot/clamp
     include/linkx_soem_demo/vehicle_control/chariot/auto_pilot
+    include/linkx_soem_demo/vehicle_control/chariot/manual_yaw_hold
     include/linkx_soem_demo/vehicle_control/interaction/robot
 )
 target_link_libraries(robot_test
@@ -745,9 +897,12 @@ install(TARGETS
     canfd_link_test
     steer_tuning
     motor_calib
+    steer_friction_4wheel
     odrive_calib
     odrive_protocol_test
     robot_test
+    clamp_telemetry
+    clamp_position_monitor
     DESTINATION lib/${PROJECT_NAME}
 )
 

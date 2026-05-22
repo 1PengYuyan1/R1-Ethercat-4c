@@ -268,7 +268,7 @@ void Class_Motor_DM_Normal::Begin_Friction_Calibration(float omega_target_rad_s,
               << "  warmup=" << warmup_s << "s  measure=" << measure_s << "s\n";
 }
 
-/**
+/** 87 9
  * @brief 启动静摩擦标定。重置累加器、配置 MIT(kp=kd=0)，τ 从 0 开始阶梯增长
  */
 void Class_Motor_DM_Normal::Begin_Stiction_Calibration(float torque_step_nm,

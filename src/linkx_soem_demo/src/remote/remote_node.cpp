@@ -14,9 +14,9 @@ public:
     // 构造时从参数服务器读取 max_speed/max_omega/deadzone 注入解算器，并建好订阅与发布
     TeleopNode() : Node("remote_node_cpp")
     {
-        this->declare_parameter("max_speed", 0.1);
-        this->declare_parameter("max_omega", 0.1);
-        this->declare_parameter("deadzone", 0.05);
+        this->declare_parameter("max_speed", 0.5);   // 2026-05-22 二次提速 0.3→0.5 (与 MAX_CHASSIS_SPEED 一致)
+        this->declare_parameter("max_omega", 0.5);   // 同步
+        this->declare_parameter("deadzone", 0.03);
 
         const float max_speed = static_cast<float>(this->get_parameter("max_speed").as_double());
         const float max_omega = static_cast<float>(this->get_parameter("max_omega").as_double());
@@ -52,7 +52,7 @@ private:
         geometry_msgs::msg::Twist twist;
         twist.linear.x  = chassis.vx * scale;
         twist.linear.y  = chassis.vy * scale;
-        twist.angular.z = chassis.omega * scale;
+        twist.angular.z = chassis.omega;
         pub_chassis_->publish(twist);
 
         std_msgs::msg::UInt16 button_msg;

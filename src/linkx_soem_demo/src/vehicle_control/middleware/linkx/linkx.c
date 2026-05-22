@@ -8,10 +8,19 @@
 
 static bool linkx_tx_queue_match_key(const linkx_tx_frame_t *a, const linkx_tx_frame_t *b)
 {
-    return (a->can_id == b->can_id) &&
-           (a->params.ext == b->params.ext) &&
-           (a->params.rtr == b->params.rtr) &&
-           (a->params.canfd == b->params.canfd);
+    // 同 can_id+params 但 data 不同的帧必须保留 (例如 OPS 一次性命令后立刻发 sentinel
+    // 顶掉 PDO slot, 若 merge 则 sentinel 直接覆盖前发, ACT 命令永远发不出去)。
+    // dlen 字段也参与比较, 确保 8B 命令帧与 0B 心跳帧不会互相 merge。
+    if (!((a->can_id == b->can_id) &&
+          (a->params.ext == b->params.ext) &&
+          (a->params.rtr == b->params.rtr) &&
+          (a->params.canfd == b->params.canfd) &&
+          (a->params.dlen == b->params.dlen)))
+    {
+        return false;
+    }
+    return (a->params.dlen == 0) ||
+           (memcmp(a->data, b->data, a->params.dlen) == 0);
 }
 
 static bool linkx_tx_queue_push_or_update(linkx_tx_queue_t *queue,

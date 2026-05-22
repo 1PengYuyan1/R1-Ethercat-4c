@@ -11,6 +11,7 @@
  */
 
 #include "dvc_ops.h"
+#include <cmath>
 #include <cstring>
 #include <iostream>
 
@@ -155,12 +156,51 @@ void Class_OPS::Try_Parse_Frame_()
 
         // ---- 5. 解析 24 字节载荷 = 6 × float32 LE ----
         const uint8_t *p = rx_buffer_ + OPS_FRAME_PAYLOAD_OFFSET;
-        data_.yaw_deg      = ops_bytes_to_float_le(p +  0);
-        data_.pitch_deg    = ops_bytes_to_float_le(p +  4);
-        data_.roll_deg     = ops_bytes_to_float_le(p +  8);
-        data_.pos_x_mm     = ops_bytes_to_float_le(p + 12);
-        data_.pos_y_mm     = ops_bytes_to_float_le(p + 16);
-        data_.yaw_rate_dps = ops_bytes_to_float_le(p + 20);
+        Struct_OPS_Data candidate;
+        candidate.yaw_deg      = ops_bytes_to_float_le(p +  0);
+        candidate.pitch_deg    = ops_bytes_to_float_le(p +  4);
+        candidate.roll_deg     = ops_bytes_to_float_le(p +  8);
+        candidate.pos_x_mm     = ops_bytes_to_float_le(p + 12);
+        candidate.pos_y_mm     = ops_bytes_to_float_le(p + 16);
+        candidate.yaw_rate_dps = ops_bytes_to_float_le(p + 20);
+
+        // ---- 5.1 Outlier 过滤: 跟上一帧比 |Δxy|/|Δyaw| 超阈值视为非物理跳变 ----
+        bool accept = true;
+        if (zero_jump_exempt_next_)
+        {
+            // ACT0 之后第一帧无条件接受 (清零跳变是合法的)
+            zero_jump_exempt_next_ = false;
+            consecutive_rejects_   = 0;
+        }
+        else if (rx_frame_count_ > 0)
+        {
+            const float dx   = std::fabs(candidate.pos_x_mm - data_.pos_x_mm);
+            const float dy   = std::fabs(candidate.pos_y_mm - data_.pos_y_mm);
+            const float dyaw = std::fabs(candidate.yaw_deg  - data_.yaw_deg);
+            if (dx   > OUTLIER_MAX_DXY_MM ||
+                dy   > OUTLIER_MAX_DXY_MM ||
+                dyaw > OUTLIER_MAX_DYAW_DEG)
+            {
+                if (consecutive_rejects_ < OUTLIER_MAX_CONSECUTIVE)
+                {
+                    accept = false;
+                    consecutive_rejects_++;
+                    outlier_reject_count_++;
+                }
+                else
+                {
+                    // 连续拒 50ms 仍超阈值 → 视为真实大动作, 强制接受跟随
+                    consecutive_rejects_ = 0;
+                }
+            }
+            else
+            {
+                consecutive_rejects_ = 0;
+            }
+        }
+
+        if (accept)
+            data_ = candidate;
 
         rx_frame_count_ += 1;
 
@@ -209,6 +249,15 @@ void Class_OPS::Send_Cmd_4_(const char prefix[4])
     uint8_t buf[8] = {0};
     std::memcpy(buf, prefix, 4);
     linkx_quick_can_send(linkx_handler_, can_channel_, can_id_, buf);
+    // PDO slot 没有 valid bit, 写入后会被 EtherCAT 每 cycle (~1ms) 持续重发,
+    // 1000Hz 灌爆 RS232↔CAN 转换器, 挤掉 OPS 上行 → status=DISABLE。
+    // 立即用全 0 sentinel 顶掉 ACT 命令; OPS 接收按 [0D 0A ... 0A 0D] 自同步,
+    // 8 字节全 0 既不是命令也不是数据头, 被无害丢弃。
+    uint8_t sentinel[8] = {0};
+    linkx_quick_can_send(linkx_handler_, can_channel_, can_id_, sentinel);
+    // ACT 命令会触发一次合法的 yaw/xy 跳变, 给 outlier 过滤豁免一帧
+    zero_jump_exempt_next_ = true;
+    consecutive_rejects_   = 0;
 }
 
 /** @brief 把 4 字节 ASCII + 4 字节 float LE 打包为 CAN 帧（DLC=8） */
@@ -219,6 +268,11 @@ void Class_OPS::Send_Cmd_4_Float_(const char prefix[4], float v)
     std::memcpy(buf, prefix, 4);
     ops_float_to_bytes_le(v, buf + 4);
     linkx_quick_can_send(linkx_handler_, can_channel_, can_id_, buf);
+    // 同 Send_Cmd_4_ 注释: sentinel 顶掉 ACT 命令防 PDO slot 持续重发
+    uint8_t sentinel[8] = {0};
+    linkx_quick_can_send(linkx_handler_, can_channel_, can_id_, sentinel);
+    zero_jump_exempt_next_ = true;
+    consecutive_rejects_   = 0;
 }
 
 /** @brief 发送 "ACTR"：开始零漂校准（约 15 分钟，全程保持模块绝对静止） */

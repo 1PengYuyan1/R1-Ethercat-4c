@@ -109,7 +109,9 @@ public:
     inline float Get_Seg_Length_Mm() const     { return seg_length_mm_; }
 
     /* ---- 调参接口（运行中也可调） ---- */
-    void Set_Lateral_PID(float kp, float ki, float kd, float out_max_mm_s);
+    // i_out_max_mm_s = 0 表示不限积分; >0 时给 I 项单独限幅,避免长直道 windup
+    void Set_Lateral_PID(float kp, float ki, float kd, float out_max_mm_s,
+                         float i_out_max_mm_s = 0.0f);
     void Set_Heading_PID(float kp, float ki, float kd, float out_max_rad_s);
 
 protected:

@@ -82,12 +82,14 @@ void Class_Auto_Pilot::Init(Class_Chassis *chassis)
                       /*Dead_Zone=*/kDefaultHeadDeadDeg);
 }
 
-void Class_Auto_Pilot::Set_Lateral_PID(float kp, float ki, float kd, float out_max_mm_s)
+void Class_Auto_Pilot::Set_Lateral_PID(float kp, float ki, float kd, float out_max_mm_s,
+                                       float i_out_max_mm_s)
 {
     pid_lateral_.Set_K_P(kp);
     pid_lateral_.Set_K_I(ki);
     pid_lateral_.Set_K_D(kd);
     pid_lateral_.Set_Out_Max(out_max_mm_s);
+    pid_lateral_.Set_I_Out_Max(i_out_max_mm_s);
 }
 
 void Class_Auto_Pilot::Set_Heading_PID(float kp, float ki, float kd, float out_max_rad_s)

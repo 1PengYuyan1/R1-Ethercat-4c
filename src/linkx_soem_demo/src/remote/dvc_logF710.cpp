@@ -63,8 +63,10 @@ void Class_LogF710::Set_Control_Params(float max_v, float max_w, float deadzone)
 
 float Class_LogF710::Apply_Deadzone(float raw_val) const
 {
-    if (std::abs(raw_val) < deadzone_) return 0.0f;
-    return raw_val;
+    const float abs_v = std::abs(raw_val);
+    if (abs_v < deadzone_) return 0.0f;
+    const float sign = (raw_val > 0.0f) ? 1.0f : -1.0f;
+    return sign * (abs_v - deadzone_) / (1.0f - deadzone_);
 }
 
 Struct_LogF710_Command Class_LogF710::Resolve_Chassis(const std::vector<float> &axes) const

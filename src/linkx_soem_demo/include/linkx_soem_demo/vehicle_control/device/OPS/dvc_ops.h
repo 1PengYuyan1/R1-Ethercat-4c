@@ -153,6 +153,7 @@ public:
     inline uint32_t Get_Rx_Frame_Count() const    { return rx_frame_count_; }
     inline uint32_t Get_Resync_Count() const      { return resync_count_; }
     inline uint32_t Get_Tail_Mismatch_Count() const { return tail_mismatch_count_; }
+    inline uint32_t Get_Outlier_Reject_Count() const { return outlier_reject_count_; }
 
     /* ------- 主动命令 ------- */
     /** @brief 发送 "ACTR"：开始 ~15 分钟的零漂校准；过程中保持模块静止 */
@@ -188,6 +189,19 @@ protected:
     uint32_t rx_frame_count_      = 0;  ///< 成功解析出的完整 OPS 帧数
     uint32_t resync_count_        = 0;  ///< 因头部不匹配而丢弃 1 字节的次数
     uint32_t tail_mismatch_count_ = 0;  ///< 头匹配但尾不匹配的次数
+    uint32_t outlier_reject_count_ = 0; ///< 帧间跳变超阈值被丢弃的次数
+
+    /* ------- Outlier 过滤 -------
+     *  OPS 在 ACT0 后偶发整段 yaw/xy 大幅突变 (实测 yaw 1s 跳 13°+),
+     *  非物理可达; 与上一帧比超阈值则丢弃 candidate, 保留 data_ 不变。
+     *  ACT0 时设 zero_jump_exempt_next_ 给清零本身的合法大跳变让路。
+     *  连续拒绝超 max_consecutive_rejects 后强制接受, 防止真实大动作被永久卡死。
+     */
+    static constexpr float    OUTLIER_MAX_DXY_MM       = 50.0f;  // 5ms 帧间最大 xy 跳变 ≈ 10 m/s 等效
+    static constexpr float    OUTLIER_MAX_DYAW_DEG     = 10.0f;  // 5ms 帧间最大 yaw 跳变 ≈ 2000 °/s
+    static constexpr uint32_t OUTLIER_MAX_CONSECUTIVE  = 10;     // 连续拒 10 帧 (50ms) 后强制接受
+    bool     zero_jump_exempt_next_ = false;
+    uint32_t consecutive_rejects_   = 0;
 
     /* ------- 内部辅助 ------- */
     /** @brief 在 rx_buffer_ 上做头部对齐 + 整帧解析（消耗式，可一次解多帧） */

@@ -261,6 +261,14 @@ void Class_Chassis::Init_Motor_Params()
     steer_wheel_params_[i].wheel_stiction        = kPerWheelCalib[i].wheel_Ts;
   }
 
+  // 2026-05-23 过冲不对称修正:w0/w1 静摩擦比 w2/w3 低 ~20%,同 mit_kd 下严重欠阻尼
+  // (实测 90° step 过冲 w0/w1 25-37% vs w2/w3 -13~+5%, 振铃 2-4Hz)
+  // 抬高 w0/w1 的 mit_kd 补回阻尼差; w2/w3 也抬到 3.5 让 stick-slip snap 后刹得住
+  steer_wheel_params_[0].mit_kd = 3.5f;
+  steer_wheel_params_[1].mit_kd = 3.5f;
+  steer_wheel_params_[2].mit_kd = 3.5f;
+  steer_wheel_params_[3].mit_kd = 3.5f;
+
   // 可选：运行时用环境变量覆盖单轮参数（无需重编译）
   // 命名示例：STEER_ID2_POS_KP / STEER_ID2_POS_KD / STEER_ID2_MIT_KP / STEER_ID2_MIT_KD
   // load_wheel_env / parse_env_f32 定义在 file-scope 匿名 ns。
@@ -535,10 +543,12 @@ void Class_Chassis::Kinematics_Inverse_Resolution()
   Math_Constrain(&Target_Omega, -MAX_CHASSIS_OMEGA, MAX_CHASSIS_OMEGA);
 
   // 全局死区：整体输入太小直接停车，但仍要走整形以更新 Target_Steer_Rad/Omage
+  // 2026-05-21: 0.02 → 0.001。原 0.02 m/s 在摇杆 max_speed=0.1 下要 20% 位移才过门槛,
+  // 实测 cmd 5/10/15 mm/s 全被截 (Δ=0), 20 mm/s 一下冲 300mm — 用户感受到的"推大位移才动"。
   const float input_mod = sqrtf(Target_Velocity_X * Target_Velocity_X +
                                 Target_Velocity_Y * Target_Velocity_Y +
                                 Target_Omega * Target_Omega);
-  if (input_mod < 0.02f)
+  if (input_mod < 0.001f)
   {
     for (int i = 0; i < STEER_NUM; i++)
     {
@@ -608,7 +618,7 @@ void Class_Chassis::Compute_Wheel_Raw_Targets(float omega_raw[STEER_NUM])
                      Target_Omega * Wheel_To_Core_Distance[i] * cos_phi;
     const float v_mod = sqrtf(vx * vx + vy * vy);
 
-    if (v_mod < 0.015f)
+    if (v_mod < 0.0005f)
     {
       omega_raw[i] = 0.0f;
       Target_Steer_Rad_Cmd[i] = Get_Now_Steer_Radian(i);

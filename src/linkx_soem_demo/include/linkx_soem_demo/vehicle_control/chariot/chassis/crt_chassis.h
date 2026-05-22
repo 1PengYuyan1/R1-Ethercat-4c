@@ -224,7 +224,10 @@ class Class_Chassis {
 
   // 机械参数
   const float angle_tolerance = 0.05f;
-  const float Wheel_Radius = 0.018f;
+  // 2026-05-22 fix: 直径 116mm (实测) → 半径 0.058m。
+  // 此前 0.018f 错小 3.22×, 让 omega_raw=v/R 算大同倍,叠加 PID 横向加成实测车速放大 4×。
+  // 见 [[cmd-to-actual-speed-16x]]。ODrive 单位是 rad/s 不是 turn/s (Makerbase 固件)。
+  const float Wheel_Radius = 0.058f;
   const float Wheel_To_Core_Distance[STEER_NUM] = {0.707f, 0.707f, 0.707f,
                                                    0.707f};
   const float Wheel_Azimuth[STEER_NUM] = {
@@ -241,8 +244,8 @@ class Class_Chassis {
    *  实测：80 → 软件 PD 模式下 motor 被钉在 ±150 翻转疯转。
    *  改 12.0 后配合 MIT 位置环 (mit_kp=50/kd=0.5)：60-90° step 响应 < 200ms。 */
   float MAX_STEER_OMEGA = 12.0f;
-  const float MAX_CHASSIS_SPEED = 0.1f;   // 手动中速上限 50cm/s; auto_pilot 自限 40mm/s 不受影响
-  const float MAX_CHASSIS_OMEGA = 0.1f;   // 与 launch max_omega 对齐; auto_pilot 自限 0.05rad/s 不受影响
+  const float MAX_CHASSIS_SPEED = 0.5f;   // 2026-05-22 二次提速 0.32→0.5; ODrive vel_limit=35 rad/s × R=0.058 ≈ 2m/s 还有 4× 余量
+  const float MAX_CHASSIS_OMEGA = 0.5f;   // 同步
 
   const float Center_Height = 0.35f;
   const float Class_Mass = 30.0f;
