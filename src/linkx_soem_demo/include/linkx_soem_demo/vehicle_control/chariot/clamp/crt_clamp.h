@@ -15,6 +15,7 @@ enum Enum_Clamp_Pitch_Large_State {
 enum Enum_Clamp_Pitch_Small_State {
   S_PITCH_POS1 = 0,
   S_PITCH_POS2,
+  S_PITCH_POS3,       // 放置位小臂角 (q2=-5.084, RB+Right 按键)
   S_PITCH_POS_FOLDED  // 折叠收姿 (q2=-3.112 小臂相对大臂折回 ~180°)
 };
 
@@ -141,16 +142,18 @@ class Class_Clamp {
 
   // === 关节空间 POS 角度 (rad) ===
   // POS1 初始/回收末态 = 水平向后 (q=0,0);
-  // POS2 抓取位 = 前方下沉 (q1=3.524, q2=-4.784, q2 单圈等价 +1.499 即 elbow_up);
+  // POS2 抓取位 = 前方下沉 (q1=3.520, q2=-4.784, q2 单圈等价 +1.499 即 elbow_up);
   // POS_FOLDED 折叠收姿 = 大臂垂直向上 + 小臂相对折回 ~180°
   //   (q1=π/2-0.016≈1.555, q2≈-π+0.03≈-3.112, q2 ∈ (-π,0) 即 elbow_down)
   //   末端 FK=(-0.7cm, +16cm) 在肩正上方; POS2→POS_FOLDED 跨 elbow 支自动判 PTP
   float pitch_large_pos1_angle = 0.0f;
-  float pitch_large_pos2_angle = 3.524f;
+  float pitch_large_pos2_angle = 3.520f;
   float pitch_large_folded_angle = 1.555f;
 
   float pitch_small_pos1_angle = 0.0f;
   float pitch_small_pos2_angle = -4.784f;
+  // POS3 放置位小臂角 (RB+Right 按键): 大臂仍走 POS2 (3.520),小臂多折一点放下负载
+  float pitch_small_pos3_angle = -5.084f;
   float pitch_small_folded_angle = -3.112f;
 
   // 当前下发的关节角(随段进度更新);掉线/失能时同步回真实角度防切回突变

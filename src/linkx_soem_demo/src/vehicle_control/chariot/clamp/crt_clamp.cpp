@@ -437,6 +437,7 @@ void Class_Clamp::_Resolve_Pos_Targets(float& q1_target,
   switch (current_pitch_small_state) {
     case S_PITCH_POS1: q2_target = pitch_small_pos1_angle; break;
     case S_PITCH_POS2: q2_target = pitch_small_pos2_angle; break;
+    case S_PITCH_POS3: q2_target = pitch_small_pos3_angle; break;
     case S_PITCH_POS_FOLDED: q2_target = pitch_small_folded_angle; break;
   }
 }

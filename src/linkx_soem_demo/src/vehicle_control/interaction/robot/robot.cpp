@@ -548,7 +548,11 @@ void Class_Robot::_Process_Function_Key_Edge(uint16_t key_code,
         std::cout << "[GANTRY] RB+Left: (placeholder)" << std::endl;
         break;
       case LogF710_Key_Right:
-        std::cout << "[GANTRY] RB+Right: (placeholder)" << std::endl;
+        Clamp.Set_Pitch_Large_State(L_PITCH_POS2);
+        Clamp.Set_Pitch_Small_State(S_PITCH_POS3);
+        std::cout << "[CLAMP] RB+Right: arm -> POS2/POS3 (place pose, "
+                     "q1=3.520, q2=-5.084)"
+                  << std::endl;
         break;
       default:
         break;

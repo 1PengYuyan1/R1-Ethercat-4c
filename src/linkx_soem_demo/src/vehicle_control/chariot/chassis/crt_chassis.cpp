@@ -236,6 +236,8 @@ void Class_Chassis::Init_Motor_Params()
 
   // 每轮独立标定值（按索引 0~3 对应 ID1~ID4）：
   //   motor-axis : 2026-05-06 calib 静摩擦补偿（原注释里有 T_stiction 但代码不用）
+  //                注: 2026-05-23 曾用 friction_4wheel 预热测的 Tc (0.0616/0.0539/0.0512/0.0665) 替换过,
+  //                实测效果很差, 已回退到此 2026-05-06 值. 重测前请先核对是否真要改.
   //   ODrive     : 2026-05-07 悬空 calib 给 J/Tc；Ts 用 2026-05-10 在地辨识值
   //                （仅替换 Ts 测试启动顿挫；R² 见每行末注释）
   static const struct {
